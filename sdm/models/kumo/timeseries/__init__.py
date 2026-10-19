@@ -2,3 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Kumo time-series model components."""
+
+__lazy_modules__ = {
+    "sdm.models.kumo.timeseries.forecast",
+}
+
+from sdm.models.kumo.timeseries.forecast import KumoForecast
+
+
+__all__ = [
+    "KumoForecast",
+]
