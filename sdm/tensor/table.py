@@ -40,6 +40,19 @@ _TORCH_NUMPY_DTYPES = {
 }
 
 
+def _iter_blocks(table: TableTensor) -> Iterator[tuple[Stype, Tensor]]:
+    """Iterate blocks as ordinary Python so ``torch.compile`` can trace them.
+
+    Dynamo treats ``TableTensor.items()`` as a tensor operation, which cannot
+    return a Python iterator.
+    """
+    yield Stype.numerical, table.numerical
+    yield Stype.categorical, table.categorical
+    yield Stype.datetime, table.datetime
+    yield Stype.text, table.text
+    yield Stype.id, table.id
+
+
 def preserve_view_inference_mode(fn: Callable) -> Callable:
     r"""Preserve input inference state for tensor view operations."""
 
@@ -870,11 +883,7 @@ class TableTensor(Tensor):
 
     def items(self) -> Iterator[tuple[Stype, Tensor]]:
         r"""Yield ``(stype, block)`` pairs for typed column blocks."""
-        yield Stype.numerical, self.numerical
-        yield Stype.categorical, self.categorical
-        yield Stype.datetime, self.datetime
-        yield Stype.text, self.text
-        yield Stype.id, self.id
+        return _iter_blocks(self)
 
     @property
     def blocks(self) -> Mapping[Stype, Tensor]:
