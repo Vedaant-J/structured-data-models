@@ -38,9 +38,6 @@ KERNEL_OF_BACKEND = {
     "int8": "sm120_int8_icl",
 }
 CLIP = 1e-7
-# More classes than this run ECOC codes as an ICL batch above 1, which the
-# 8-bit kernel does not take (batch 1 only).
-MAX_INT8_CLASSES = 10
 # LEVELS[i] is the (i + 1) / 1000 quantile.
 LEVELS = (np.arange(999) + 1) / 1000
 MEDIAN = 499
@@ -193,15 +190,9 @@ def distance(reference, candidate, regression, scale):
 
 def run_group(args, name, info, df, size, context, model, task):
     regression = info["task"] == "regression"
-    settings = [
-        s
-        for s in args.settings
-        if (info["classes"] or 0) <= MAX_INT8_CLASSES
-        or registry.parse_attention(s)[0] != "int8"
-    ]
-    arms = ["eager", "compiled", *settings]
+    arms = ["eager", "compiled", *args.settings]
     torch._dynamo.reset()
-    forwards = Arms(model, task, settings, args.device)
+    forwards = Arms(model, task, args.settings, args.device)
     for query_rows in args.queries:
         for seed in args.seeds:
             path = (

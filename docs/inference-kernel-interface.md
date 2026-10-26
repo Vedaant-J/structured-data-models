@@ -81,7 +81,7 @@ Every op is a `sdm_inference::<op>` custom op with a reference in `registry.OPS`
 | `int8+ends`       | as `int8`, first and last ICL fit call of each graph native | `opt-in`                            |
 | `off`             | none                                                        | bitwise (with the exact ops)        |
 
-The rule matches the flash node of a self-attention with head dim 64 and at least 1,024 rows (fit; predict has 16 queries against the cache). The BF16 kernels admit at most 65,535 rows, the largest context at which their error and determinism were checked; the INT8 kernel has no row cap but needs batch 1 and 32-bit element offsets. `exact=True` keeps attention native whatever the setting.
+The rule matches the flash node of a self-attention with head dim 64 and at least 1,024 rows (fit; predict has 16 queries against the cache). The BF16 kernels admit at most 65,535 rows, the largest context at which their error and determinism were checked; the INT8 kernel has no row cap and takes any batch (ECOC runs more than 10 classes as an ICL batch of codes) up to 65,535, with batch × heads × padded rows below 2³¹. `+ends` counts as fit calls the self-attention calls of at least 1,024 rows. `exact=True` keeps attention native whatever the setting.
 
 ## Shape bounds and scope
 

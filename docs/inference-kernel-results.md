@@ -86,6 +86,20 @@ Max |Δprob| against compiled on the 16 timed query rows of each cell, with comp
 
 Class agreement was 100% for every arm in every cell. The 8-bit attention stays inside the gap except at Large 100k, where int8 is 5.7x and int8+ends 2x over a small gap; the 16-row gap varies a lot between cells, so the accuracy study below is the better guide.
 
+### More than 10 classes (ECOC)
+
+Classification with more than 10 classes runs its ECOC codes as an ICL batch of T entries, so each fit attention call is T times larger. The 8-bit kernel takes these batches (each entry keeps its own quantization statistics). Large, whole table up to the context shown, same cell layout:
+
+| Dataset          | Classes | T  | Context | a compiled  | c +bf16 attn        | d +int8 attn         |
+| ---------------- | ------- | -- | ------- | ----------- | ------------------- | -------------------- |
+| letter           | 26      | 8  | 18,976  | 4,677, 22.9 | 4,269 (-8.7%), 18.2 | 3,561 (-23.9%), 18.2 |
+| kropt            | 18      | 8  | 18,000  | 3,365, 21.6 | 3,097 (-8.0%), 16.8 | 2,476 (-26.4%), 16.8 |
+| walking_activity | 22      | 8  | 18,000  | 3,186, 21.5 | 2,936 (-7.8%), 16.7 | 2,314 (-27.4%), 16.7 |
+| helena           | 100     | 12 | 12,000  | 4,864, 22.1 | 4,439 (-8.7%), 17.8 | 4,047 (-16.8%), 17.8 |
+| dionis           | 355     | 40 | 3,500   | 8,063, 26.0 | 7,468 (-7.4%), 25.6 | 7,380 (-8.5%), 25.6  |
+
+The 8-bit kernel launched at all 23 fit calls in every cell (21 with `+ends`). Memory limits these tasks: T x context rows of about 150,000 fills a 32 GB card. The 8-bit gain shrinks with the context per entry (dionis: 3,500 rows), as at small contexts above.
+
 ## Effect of SDM #1055 on the compiled baseline
 
 SDM #1055 makes attention and cell embedding chunk under `torch.compile` with a memory budget per chunk. Compiled Large 50k, compiled arm only, 2 processes x 6 blocks each:
@@ -136,14 +150,14 @@ Large, 50,000 context rows (47,818 for adult, the whole table), 16 and 1,024 que
 - **int8 (d)** is over the per-seed gap in 1 of 3 covertype 16-row seeds (0.0275 against 0.0098). At 1,024 rows it flips 0 to 0.29% of rows (eager 0.6 to 1.7%). Log-loss moves by -0.0002 to +0.0062.
 - **int8+ends** is over the gap in 1 of 3 covertype 16-row seeds, flips fewer rows than int8, and moves log-loss by -0.0022 to +0.0052.
 
-Two more classification tables, same layout. bank_marketing uses 44,187 context rows and letter 18,976, the whole table in each case. On letter the 8-bit settings stay native (see below).
+Two more classification tables, same layout. bank_marketing uses 44,187 context rows and letter 18,976, the whole table in each case.
 
 | Dataset        | Query rows | compiled vs eager  | c BF16             | d int8             | int8+ends          |
 | -------------- | ---------- | ------------------ | ------------------ | ------------------ | ------------------ |
 | bank_marketing | 16         | 0.0248, 0, -0.0023 | 0.0037, 0, +0.0000 | 0.0062, 0, -0.0006 | 0.0035, 0, -0.0001 |
 | bank_marketing | 1,024      | 0.0397, 6, -0.0001 | 0.0064, 0, +0.0000 | 0.0063, 2, -0.0000 | 0.0060, 0, -0.0000 |
-| letter         | 16         | 0.0154, 0, +0.0010 | 0.0014, 0, -0.0001 | native             | native             |
-| letter         | 1,024      | 0.0675, 0, +0.0001 | 0.0104, 0, +0.0000 | native             | native             |
+| letter         | 16         | 0.0154, 0, +0.0010 | 0.0014, 0, -0.0001 | 0.0009, 0, -0.0001 | 0.0031, 0, -0.0001 |
+| letter         | 1,024      | 0.0675, 0, +0.0001 | 0.0104, 0, +0.0000 | 0.0274, 0, +0.0000 | 0.0280, 0, -0.0000 |
 
 Small and Medium, 50,000 context rows, seed 0 only, so the flips are out of 16 or 1,024 rows:
 
@@ -182,7 +196,7 @@ Regression, Large, 6 TabArena tables (context: the table minus 1,024, at most 50
 - **BF16 (c):** the max over all quantiles is inside the same seed's eager gap in 36 of 36 runs, and so is the point prediction. Within each band of quantiles (5% tails, 45 to 55% median) it passes eager's band max in 2 of 108 cases, both in the high tail (diamonds 16 rows: 0.063 against 0.031; qsar_tid_11 1,024 rows: 0.453 against 0.441). RMSE moves at most 1.1% in any seed (eager: up to 7.0%).
 - **int8 (d):** the point prediction is inside the gap in 36 of 36 runs; the max over all quantiles in 31 of 36. The misses are on diamonds, qsar_tid_11 and superconductivity, in the tail quantiles (12 of 108 band cases). RMSE moves at most 2.4% in a seed.
 - **int8+ends:** point prediction 36 of 36; all quantiles 33 of 36; 10 of 108 band cases over; RMSE at most 3.4% in a seed (diamonds, 16 rows).
-- **letter:** with 26 classes ECOC runs the ICL attention as a batch of 8. The 8-bit kernel takes only batch 1 and refuses it ("needs batch 1 (the ICL fit site); got 8"), so attention stays native and d and int8+ends equal compiled. BF16 takes batch 8 and is inside the gap.
+- **More than 10 classes (ECOC):** on Large, letter (26 classes, above), kropt and walking_activity (18,000 context rows), helena (12,000, 100 classes) and dionis (3,500, 355 classes, seed 0 only), the 8-bit settings behave as on the tables with 10 classes or fewer: inside the same seed's gap in every run, and at 1,024 query rows no more flips than eager (int8: 0, 5, 8, 24 and 3 rows over the seeds; eager: 0, 11, 24, 131 and 11) with log-loss moving by at most ±0.0008.
 
 ### Determinism
 

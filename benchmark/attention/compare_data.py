@@ -31,6 +31,10 @@ CLASSIFICATION = {
     "volkert": 41166,
     "letter": 6,
     "bank_marketing": 1461,
+    "kropt": 184,
+    "walking_activity": 1509,
+    "helena": 41169,
+    "dionis": 41167,
 }
 
 

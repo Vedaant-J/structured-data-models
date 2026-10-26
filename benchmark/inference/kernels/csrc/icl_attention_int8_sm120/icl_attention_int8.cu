@@ -489,10 +489,10 @@ void run(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v, at::Tens
                   out.stride(0) % 2 == 0 && out.stride(1) % 2 == 0 && out.stride(2) % 2 == 0,
               "icl_attention_int8: out must have the dtype and shape of q, a unit last stride and even strides");
   TORCH_CHECK(k.sizes() == q.sizes() && v.sizes() == q.sizes(), "icl_attention_int8: k and v must have the shape of q");
+  TORCH_CHECK(q.size(2) > 0 && q.size(0) <= 65535 && q.size(1) <= 65535 &&
+                  q.size(0) * q.size(1) * (q.size(2) + BN) < (1ll << 31),
+              "icl_attention_int8: S must be positive, B and H at most 65535 and B * H * (S + 64) below 2^31");
   int B = q.size(0), H = q.size(1), S = q.size(2);
-  TORCH_CHECK(S > 0 && (int64_t)S * std::max(q.stride(2), std::max(k.stride(2), v.stride(2))) < (1ll << 31) &&
-                  (int64_t)B * H * S * D < (1ll << 31),
-              "icl_attention_int8: S must be positive and element offsets must fit in int32");
   c10::cuda::CUDAGuard guard(q.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   int S_pad = (S + BN - 1) / BN * BN;

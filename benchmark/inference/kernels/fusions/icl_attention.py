@@ -45,6 +45,7 @@ MIN_S = 1024
 # Largest context the BF16 kernel's error and determinism were checked at;
 # Medium at 100k misses the tolerance gate.
 MAX_S = 65_535
+GRID = 65_535
 FA2_SYMBOL = "void flash::flash_fwd_kernel<"
 INT8_SYMBOLS = (
     "icl_attention_int8::quant_kernel",
@@ -114,13 +115,12 @@ def _bf16_limits(q: Tensor) -> str | None:
     return None
 
 
-def _int8_limits(q: Tensor, k: Tensor, v: Tensor) -> str | None:
+def _int8_limits(q: Tensor) -> str | None:
     b, s, h, _ = q.shape
-    if b != 1:
-        return f"needs batch 1 (the ICL fit site); got {b}"
-    rows = max(t.stride(1) for t in (q, k, v))
-    if s * rows >= 2**31 or b * h * s * HEAD >= 2**31:
-        return "needs 32-bit element offsets"
+    if b > GRID or h > GRID:
+        return f"needs batch and heads <= {GRID}; got {b}, {h}"
+    if b * h * (s + 64) >= 2**31:
+        return "needs batch * heads * padded S < 2**31"
     return None
 
 
@@ -139,7 +139,7 @@ def _policy(want: str):
         if want == "int8":
             return _admits(
                 q, k, v, scale, (torch.bfloat16, torch.float16)
-            ) or _int8_limits(q, k, v)
+            ) or _int8_limits(q)
         return _admits(q, k, v, scale) or (
             None if "uncapped" in chosen else _bf16_limits(q)
         )
@@ -195,12 +195,12 @@ def _flash_node(node: Node) -> tuple[tuple[Node, ...], Node] | None:
 
 
 def _fit_call(node: Node) -> bool:
-    """A batch-1 self-attention flash call: an ICL fit call."""
+    """A self-attention flash call over at least ``MIN_S`` rows: ICL fit."""
     found = _flash_node(node)
     if found is None:
         return False
     q, k, _ = (val(t) for t in found[0])
-    return q.shape == k.shape and q.size(0) == 1 and q.size(3) == HEAD
+    return q.shape == k.shape and q.size(2) >= MIN_S and q.size(3) == HEAD
 
 
 def _rule(graph: Graph, node: Node) -> bool:
